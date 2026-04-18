@@ -29,13 +29,14 @@ def _collect_api_keys():
 
 API_KEYS = _collect_api_keys()
 
-# 무료 티어에서 사용 가능한 모델 우선순위 목록
+# 모델 우선순위 목록 (gemini-2.5-flash-lite 최우선)
 CANDIDATE_MODELS = [
-    "gemini-2.0-flash-lite",
+    "gemini-2.5-flash-lite",   # 최우선: 가장 최신 lite 모델
+    "gemini-2.0-flash-lite",   # 폴백 1
     "gemini-2.0-flash-lite-001",
-    "gemini-2.0-flash",
+    "gemini-2.0-flash",        # 폴백 2
     "gemini-2.0-flash-001",
-    "gemini-2.5-flash",
+    "gemini-2.5-flash",        # 폴백 3
 ]
 
 def _build_prompt(text, fallback_title):
