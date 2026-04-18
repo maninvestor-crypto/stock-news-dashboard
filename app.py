@@ -1,7 +1,12 @@
+import os
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
+from dotenv import load_dotenv, find_dotenv
 from news_fetcher import get_news_links, extract_article_text
 from ai_summarizer import summarize_text
+
+load_dotenv(find_dotenv(), override=True)
+DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "admin1234")
 
 # ─── 페이지 설정 ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -59,6 +64,10 @@ if "num_news" not in st.session_state:
 if "seen_links" not in st.session_state:
     st.session_state.seen_links = set()
 
+# 키워드 편집 서장 여부
+if "is_admin" not in st.session_state:
+    st.session_state.is_admin = False
+
 # ─── 사이드바 ─────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title("⚙️ 설정")
@@ -67,27 +76,52 @@ with st.sidebar:
 
     # 1) 키워드 관리
     st.subheader("🔍 키워드 관리")
-    new_keyword = st.text_input("키워드 추가", placeholder="예: 현대차, 2차전지…", key="new_kw_input")
-    if st.button("➕ 추가", use_container_width=True):
-        kw = new_keyword.strip()
-        if kw and kw not in st.session_state.keywords:
-            st.session_state.keywords.append(kw)
-            st.rerun()
-        elif not kw:
-            st.warning("키워드를 입력해 주세요.")
-        else:
-            st.warning("이미 등록된 키워드입니다.")
 
-    # 현재 등록된 키워드 목록 + 삭제 버튼
-    st.markdown("**등록된 키워드:**")
+    # 등록된 키워드 목록은 누구나 볼 수 있음
+    st.markdown(" **등록된 키워드:**")
     for kw in list(st.session_state.keywords):
         col1, col2 = st.columns([4, 1])
         with col1:
             st.markdown(f'<span class="keyword-tag">{kw}</span>', unsafe_allow_html=True)
         with col2:
-            if st.button("✕", key=f"del_{kw}", help=f"'{kw}' 삭제"):
-                st.session_state.keywords.remove(kw)
+            # 삭제는 관리자만 가능
+            if st.session_state.is_admin:
+                if st.button("✕", key=f"del_{kw}", help=f"'{kw}' 삭제"):
+                    st.session_state.keywords.remove(kw)
+                    st.rerun()
+            else:
+                st.markdown("🔒", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # 관리자 인증 섹션
+    if not st.session_state.is_admin:
+        st.markdown("🔐 **키워드 편집 (관리자 전용)**")
+        pw_input = st.text_input("비밀번호 입력", type="password", key="pw_input")
+        if st.button("키워드 편집 토글", use_container_width=True):
+            if pw_input == DASHBOARD_PASSWORD:
+                st.session_state.is_admin = True
+                st.success("✅ 관리자 모드 활성화")
                 st.rerun()
+            else:
+                st.error("❌ 비밀번호가 틀립니다.")
+    else:
+        st.success("✅ 관리자 모드")
+        if st.button("🚪 로그아웃", use_container_width=True):
+            st.session_state.is_admin = False
+            st.rerun()
+
+        # 키워드 추가 (인증 시에만 표시)
+        new_keyword = st.text_input("키워드 추가", placeholder="예: 현대차, 2차전지…", key="new_kw_input")
+        if st.button("➕ 추가", use_container_width=True):
+            kw = new_keyword.strip()
+            if kw and kw not in st.session_state.keywords:
+                st.session_state.keywords.append(kw)
+                st.rerun()
+            elif not kw:
+                st.warning("키워드를 입력해 주세요.")
+            else:
+                st.warning("이미 등록된 키워드입니다.")
 
     st.markdown("---")
 
