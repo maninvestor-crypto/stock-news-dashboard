@@ -233,7 +233,7 @@ with st.sidebar:
             value=st.session_state.num_news
         )
     else:
-        st.caption(f"🔒 키워드당 뉴스 수: **{st.session_state.num_news}건** (관리자만 변경 가능)
+        st.caption(f"🔒 키워드당 뉴스 수: **{st.session_state.num_news}건** (관리자만 변경 가능)")
 
     st.markdown("---")
 
