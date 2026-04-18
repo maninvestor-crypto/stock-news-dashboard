@@ -227,25 +227,34 @@ with st.sidebar:
 
     # 2) 뉴스 개수
     st.subheader("📰 뉴스 개수")
-    st.session_state.num_news = st.slider(
-        "키워드당 뉴스 수", min_value=1, max_value=5,
-        value=st.session_state.num_news
-    )
+    if st.session_state.is_admin:
+        st.session_state.num_news = st.slider(
+            "키워드당 뉴스 수", min_value=1, max_value=5,
+            value=st.session_state.num_news
+        )
+    else:
+        st.caption(f"🔒 키워드당 뉴스 수: **{st.session_state.num_news}건** (관리자만 변경 가능)
 
     st.markdown("---")
 
     # 3) 자동 새로고침
     st.subheader("🔄 자동 새로고침")
     refresh_options = {"사용 안함": 0, "10분": 10, "30분": 30, "1시간": 60}
-    selected_refresh = st.selectbox(
-        "새로고침 주기",
-        options=list(refresh_options.keys()),
-        index=list(refresh_options.values()).index(st.session_state.auto_refresh_min)
-        if st.session_state.auto_refresh_min in refresh_options.values() else 0
-    )
-    st.session_state.auto_refresh_min = refresh_options[selected_refresh]
+    refresh_labels = {v: k for k, v in refresh_options.items()}
+    if st.session_state.is_admin:
+        selected_refresh = st.selectbox(
+            "새로고침 주기",
+            options=list(refresh_options.keys()),
+            index=list(refresh_options.values()).index(st.session_state.auto_refresh_min)
+            if st.session_state.auto_refresh_min in refresh_options.values() else 0
+        )
+        st.session_state.auto_refresh_min = refresh_options[selected_refresh]
+    else:
+        current_label = refresh_labels.get(st.session_state.auto_refresh_min, "사용 안함")
+        st.caption(f"🔒 새로고침 주기: **{current_label}** (관리자만 변경 가능)")
     if st.session_state.auto_refresh_min > 0:
-        st.success(f"✅ {selected_refresh}마다 자동 갱신 중")
+        curr_label = refresh_labels.get(st.session_state.auto_refresh_min, "")
+        st.success(f"✅ {curr_label}마다 자동 갱신 중")
     else:
         st.info("자동 새로고침 꺼짐")
 
