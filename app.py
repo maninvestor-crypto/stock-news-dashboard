@@ -55,6 +55,10 @@ if "auto_refresh_min" not in st.session_state:
 if "num_news" not in st.session_state:
     st.session_state.num_news = 2
 
+# 이미 본 뉴스 링크 저장 (세션 동안 유지)
+if "seen_links" not in st.session_state:
+    st.session_state.seen_links = set()
+
 # ─── 사이드바 ─────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title("⚙️ 설정")
@@ -119,7 +123,20 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # 4) 수동 새로고침 버튼
+    # 4) 읽은 뉴스 관리
+    st.subheader("🗑 읽은 뉴스 관리")
+    seen_count = len(st.session_state.seen_links)
+    if seen_count > 0:
+        st.info(f"현재 {seen_count}개의 뉴스가 숨김 처리되어 있습니다.")
+        if st.button("🔄 읽은 뉴스 초기화", use_container_width=True):
+            st.session_state.seen_links = set()
+            st.rerun()
+    else:
+        st.caption("숨김 처리된 뉴스가 없습니다.")
+
+    st.markdown("---")
+
+    # 5) 수동 새로고침 버튼
     if st.button("⚡ 지금 새로고침", use_container_width=True, type="primary"):
         st.cache_data.clear()
         st.rerun()
@@ -158,10 +175,25 @@ for keyword in st.session_state.keywords:
         st.warning(f"'{keyword}' 관련 최신 뉴스를 찾을 수 없습니다.")
         continue
 
-    for article in articles:
+    # 이미 본 뉴스 필터링
+    new_articles = [a for a in articles if a["link"] not in st.session_state.seen_links]
+    skipped = len(articles) - len(new_articles)
+
+    if skipped > 0:
+        st.caption(f"ℹ️ 이미 제공된 뉴스 {skipped}건은 제외되었습니다.")
+
+    if not new_articles:
+        st.info(f"'{keyword}' 의 새로운 뉴스가 없습니다. 사이드바에서 읽은 뉴스를 초기화하거나 나중에 다시 확인해 주세요.")
+        st.markdown("---")
+        continue
+
+    for article in new_articles:
         title = article["title"]
         link = article["link"]
         published = article.get("published", "날짜 알 수 없음")
+
+        # 노출된 뉴스 링크를 seen_links에 등록
+        st.session_state.seen_links.add(link)
 
         with st.expander(f"📰 {title}", expanded=True):
             st.caption(f"🗓 게시일: {published} | [원문 기사 보러가기]({link})")
