@@ -1,4 +1,5 @@
 import os
+import json
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 from dotenv import load_dotenv, find_dotenv
@@ -7,6 +8,26 @@ from ai_summarizer import summarize_text
 
 load_dotenv(find_dotenv(), override=True)
 DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "admin1234")
+
+# ─── 키워드 영구 저장 함수 ────────────────────────────────────────────────────────
+KEYWORDS_FILE = os.path.join(os.path.dirname(__file__), "keywords.json")
+DEFAULT_KEYWORDS = ["삼성전자", "SK하이닉스", "AI 인프라", "바이오"]
+
+def load_keywords():
+    """keywords.json 파일에서 키워드 목록을 로드합니다."""
+    try:
+        with open(KEYWORDS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, list) and data:
+                return data
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    return DEFAULT_KEYWORDS.copy()
+
+def save_keywords(keywords):
+    """keywords.json 파일에 키워드 목록을 저장합니다."""
+    with open(KEYWORDS_FILE, "w", encoding="utf-8") as f:
+        json.dump(keywords, f, ensure_ascii=False, indent=2)
 
 # ─── 페이지 설정 ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -52,7 +73,8 @@ html, body, [class*="css"] { font-family: 'Noto Sans KR', sans-serif; }
 
 # ─── 세션 상태 초기화 ────────────────────────────────────────────────────────
 if "keywords" not in st.session_state:
-    st.session_state.keywords = ["삼성전자", "SK하이닉스", "AI 인프라", "바이오"]
+    # 파일에서 로드 (세션 시작 시 1회만 실행)
+    st.session_state.keywords = load_keywords()
 
 if "auto_refresh_min" not in st.session_state:
     st.session_state.auto_refresh_min = 30
@@ -88,6 +110,7 @@ with st.sidebar:
             if st.session_state.is_admin:
                 if st.button("✕", key=f"del_{kw}", help=f"'{kw}' 삭제"):
                     st.session_state.keywords.remove(kw)
+                    save_keywords(st.session_state.keywords)  # 파일에 저장
                     st.rerun()
             else:
                 st.markdown("🔒", unsafe_allow_html=True)
@@ -117,6 +140,7 @@ with st.sidebar:
             kw = new_keyword.strip()
             if kw and kw not in st.session_state.keywords:
                 st.session_state.keywords.append(kw)
+                save_keywords(st.session_state.keywords)  # 파일에 저장
                 st.rerun()
             elif not kw:
                 st.warning("키워드를 입력해 주세요.")
