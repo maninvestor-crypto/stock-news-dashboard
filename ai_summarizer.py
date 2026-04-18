@@ -2,19 +2,40 @@ import os
 from google import genai
 from dotenv import load_dotenv, find_dotenv
 
-# .env 파일을 물리적으로 찾아 안전하게 로드합니다. (파일이 없으면 무시)
+# .env 파일을 안전하게 로드
 load_dotenv(find_dotenv(), override=True)
 
-api_key = os.getenv("GEMINI_API_KEY")
+# ─── API 키 목록 수집 ────────────────────────────────────────────────────────
+# 환경변수에서 GEMINI_API_KEY, GEMINI_API_KEY_1, GEMINI_API_KEY_2 … 순서로 모두 수집
+def _collect_api_keys():
+    keys = []
+    # 단일 키 (기본)
+    k = os.getenv("GEMINI_API_KEY", "").strip()
+    if k:
+        keys.append(k)
+    # 번호 키 1~10
+    for i in range(1, 11):
+        k = os.getenv(f"GEMINI_API_KEY_{i}", "").strip()
+        if k:
+            keys.append(k)
+    # 중복 제거 (순서 유지)
+    seen = set()
+    unique = []
+    for k in keys:
+        if k not in seen:
+            seen.add(k)
+            unique.append(k)
+    return unique
 
-# 무료 티어에서 사용 가능한 모델 우선순위 목록 (순서대로 시도)
-# 무겁고 비싼 모델일수록 뒤에 배치
+API_KEYS = _collect_api_keys()
+
+# 무료 티어에서 사용 가능한 모델 우선순위 목록
 CANDIDATE_MODELS = [
-    "gemini-2.0-flash-lite",   # 무료 티어 최우선 (가장 가볍고 빠름)
+    "gemini-2.0-flash-lite",
     "gemini-2.0-flash-lite-001",
-    "gemini-2.0-flash",        # 중간 성능
+    "gemini-2.0-flash",
     "gemini-2.0-flash-001",
-    "gemini-2.5-flash",        # 최고 성능 (할당량 소진 시 폴백)
+    "gemini-2.5-flash",
 ]
 
 def _build_prompt(text, fallback_title):
@@ -33,32 +54,49 @@ def _build_prompt(text, fallback_title):
     return None
 
 def summarize_text(text, fallback_title=""):
-    """기사 본문을 입력받아 3줄 이내로 요약합니다. 모델 할당량 초과 시 다음 모델로 자동 전환합니다."""
-    if not api_key:
+    """기사 본문을 입력받아 3줄 이내로 요약합니다.
+    - 등록된 API 키를 순서대로 시도합니다.
+    - 할당량 초과(429) 시 다음 키로 자동 전환합니다.
+    - 각 키마다 사용 가능한 모델을 순서대로 시도합니다.
+    """
+    if not API_KEYS:
         return "API 키가 설정되지 않아 요약 기능을 사용할 수 없습니다. `.env` 파일을 확인해 주세요."
 
     prompt = _build_prompt(text, fallback_title)
     if prompt is None:
         return "기사 본문과 제목을 모두 가져올 수 없습니다."
 
-    client = genai.Client(api_key=api_key)
     last_error = None
 
-    for model_name in CANDIDATE_MODELS:
-        try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt
-            )
-            return response.text
-        except Exception as e:
-            err_str = str(e)
-            # 할당량 초과(429) 또는 모델 미지원(404)인 경우 다음 모델로 전환
-            if "429" in err_str or "404" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-                last_error = e
-                continue
-            else:
-                # 그 외 오류는 즉시 반환
-                return f"요약 중 오류 발생: {e}"
+    for api_key in API_KEYS:
+        client = genai.Client(api_key=api_key)
 
-    return f"현재 사용 가능한 모델이 없습니다. 잠시 후 다시 시도해 주세요.\n(마지막 오류: {last_error})"
+        for model_name in CANDIDATE_MODELS:
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt
+                )
+                return response.text
+
+            except Exception as e:
+                err_str = str(e)
+                if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                    # 이 키/모델 할당량 초과 → 다음 모델 시도
+                    last_error = e
+                    continue
+                elif "404" in err_str or "NOT_FOUND" in err_str:
+                    # 모델 미지원 → 다음 모델 시도
+                    last_error = e
+                    continue
+                else:
+                    # 그 외 오류(인증 실패 등)는 즉시 반환
+                    return f"요약 중 오류 발생: {e}"
+
+        # 이 키의 모든 모델이 할당량 초과 → 다음 키로 전환
+        continue
+
+    return (
+        f"현재 모든 API 키의 할당량이 소진되었습니다. 잠시 후 다시 시도해 주세요.\n"
+        f"(등록된 키: {len(API_KEYS)}개 / 마지막 오류: {last_error})"
+    )
