@@ -150,6 +150,10 @@ if "num_news" not in st.session_state:
 if "seen_links" not in st.session_state:
     st.session_state.seen_links = set()
 
+# 요청 시 실시간 요약 결과 캐시 (link -> result dict)
+if "on_demand_summaries" not in st.session_state:
+    st.session_state.on_demand_summaries = {}
+
 if "is_admin" not in st.session_state:
     st.session_state.is_admin = False
 
@@ -351,77 +355,117 @@ for keyword in st.session_state.keywords:
         st.warning(f"'{keyword}' 관련 최신 뉴스를 찾을 수 없습니다.")
         continue
 
-    new_articles = [a for a in articles if a["link"] not in st.session_state.seen_links]
-    skipped = len(articles) - len(new_articles)
-    if skipped > 0:
-        st.caption(f"ℹ️ 이미 제공된 뉴스 {skipped}건은 제외되었습니다.")
-
-    if not new_articles:
-        st.info(f"'{keyword}' 의 새로운 뉴스가 없습니다. 사이드바에서 읽은 뉴스를 초기화하거나 나중에 다시 확인해 주세요.")
-        st.markdown("---")
-        continue
-
-    for article in new_articles:
+    for article in articles:
         title     = article["title"]
         link      = article["link"]
         published = article.get("published", "날짜 알 수 없음")
-
-        # 이미 본 뉴스로 등록
-        st.session_state.seen_links.add(link)
+        is_seen   = link in st.session_state.seen_links
 
         # 중요 키워드 감지
-        alerts = check_alert_keywords(title)
+        alerts    = check_alert_keywords(title)
         alert_str = " ".join([f'<span class="alert-tag">🚨 {kw}</span>' for kw in alerts])
-        expander_title = f"🚨 {title}" if alerts else f"📰 {title}"
 
-        with st.expander(expander_title, expanded=True):
+        # ────────────────────────────────────────────────
+        # 케이스 A: 이전 열람 기사 → 제목만 접혀 표시, 요약 버튼
+        # ────────────────────────────────────────────────
+        if is_seen:
+            icon = "🚨" if alerts else "📄"
+            expander_title = f"{icon} [열람됨] {title}"
+            with st.expander(expander_title, expanded=False):
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.caption(f"🗓 게시일: {published} | [원문 기사 보러가기]({link})")
+                    if alert_str:
+                        st.markdown(alert_str, unsafe_allow_html=True)
 
-            with st.spinner("AI 요약 및 중요도 분석 중..."):
-                text_content = extract_article_text(link)
-                result = summarize_text(text_content, fallback_title=title)
+                # 이미 요약된 상태이면 바로 표시
+                if link in st.session_state.on_demand_summaries:
+                    cached = st.session_state.on_demand_summaries[link]
+                    c_summary = cached.get("summary", "")
+                    c_score   = cached.get("score", 0)
+                    c_badge, c_color = get_score_badge(c_score)
+                    with col2:
+                        st.markdown(
+                            f'<div style="text-align:right; color:{c_color}; font-weight:700;">'
+                            f'중요도 {c_score}/10<br>{c_badge}</div>',
+                            unsafe_allow_html=True,
+                        )
+                    box_class = "summary-box-alert" if alerts else "summary-box"
+                    st.markdown("**🤖 AI 3줄 요약:**")
+                    st.markdown(f'<div class="{box_class}">{c_summary}</div>', unsafe_allow_html=True)
 
-            summary = result.get("summary", "요약 실패")
-            score   = result.get("score", 0)
-            badge_text, badge_color = get_score_badge(score)
+                    # 열람 후 데이터로 북마크 버튼
+                    bm_links = [b["link"] for b in st.session_state.bookmarks]
+                    if link in bm_links:
+                        st.success("📌 북마크됨")
+                    else:
+                        if st.button("📌 북마크", key=f"bm_{link}"):
+                            new_bm = {
+                                "title": title, "link": link, "published": published,
+                                "summary": c_summary, "score": c_score,
+                                "saved_at": datetime.now(kst).strftime("%Y-%m-%d %H:%M KST"),
+                            }
+                            st.session_state.bookmarks.append(new_bm)
+                            save_bookmarks(st.session_state.bookmarks)
+                            st.rerun()
+                else:
+                    # 요약 버튼 표시
+                    if st.button("🤖 AI 요약 보기", key=f"summarize_{link}", use_container_width=True):
+                        with st.spinner("AI 요약 중..."):
+                            text_content = extract_article_text(link)
+                            result = summarize_text(text_content, fallback_title=title)
+                        st.session_state.on_demand_summaries[link] = result
+                        st.rerun()
 
-            # 상단: 날짜 | 링크 | 중요도
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.caption(f"🗓 게시일: {published} | [원문 기사 보러가기]({link})")
-                if alert_str:
-                    st.markdown(alert_str, unsafe_allow_html=True)
-            with col2:
-                st.markdown(
-                    f'<div style="text-align:right; color:{badge_color}; font-weight:700; font-size:1em;">'
-                    f'중요도 {score}/10<br>{badge_text}</div>',
-                    unsafe_allow_html=True,
-                )
+        # ────────────────────────────────────────────────
+        # 케이스 B: 신규 기사 → 자동 요약 + 중요도 표시
+        # ────────────────────────────────────────────────
+        else:
+            # 열람 기록에 추가
+            st.session_state.seen_links.add(link)
 
-            # 요약 박스 (알림 키워드 있으면 붉은 테두리)
-            box_class = "summary-box-alert" if alerts else "summary-box"
-            st.markdown("**🤖 AI 3줄 요약:**")
-            st.markdown(f'<div class="{box_class}">{summary}</div>', unsafe_allow_html=True)
+            expander_title = f"🚨 {title}" if alerts else f"📰 {title}"
+            with st.expander(expander_title, expanded=True):
 
-            if not text_content:
-                st.warning("⚠️ 원문 접근이 차단되어 제목 기반으로 AI가 추론한 요약입니다.")
+                with st.spinner("AI 요약 및 중요도 분석 중..."):
+                    text_content = extract_article_text(link)
+                    result = summarize_text(text_content, fallback_title=title)
 
-            # 북마크 버튼
-            bm_links = [b["link"] for b in st.session_state.bookmarks]
-            if link in bm_links:
-                st.success("📌 북마크됨")
-            else:
-                if st.button("📌 북마크", key=f"bm_{link}"):
-                    new_bm = {
-                        "title": title,
-                        "link": link,
-                        "published": published,
-                        "summary": summary,
-                        "score": score,
-                        "saved_at": datetime.now(kst).strftime("%Y-%m-%d %H:%M KST"),
-                    }
-                    st.session_state.bookmarks.append(new_bm)
-                    save_bookmarks(st.session_state.bookmarks)
-                    st.success("📌 북마크에 저장되었습니다!")
-                    st.rerun()
+                summary = result.get("summary", "요약 실패")
+                score   = result.get("score", 0)
+                badge_text, badge_color = get_score_badge(score)
+
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.caption(f"🗓 게시일: {published} | [원문 기사 보러가기]({link})")
+                    if alert_str:
+                        st.markdown(alert_str, unsafe_allow_html=True)
+                with col2:
+                    st.markdown(
+                        f'<div style="text-align:right; color:{badge_color}; font-weight:700; font-size:1em;">'
+                        f'중요도 {score}/10<br>{badge_text}</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                box_class = "summary-box-alert" if alerts else "summary-box"
+                st.markdown("**🤖 AI 3줄 요약:**")
+                st.markdown(f'<div class="{box_class}">{summary}</div>', unsafe_allow_html=True)
+
+                if not text_content:
+                    st.warning("⚠️ 원문 접근이 차단되어 제목 기반으로 AI가 추론한 요약입니다.")
+
+                bm_links = [b["link"] for b in st.session_state.bookmarks]
+                if link in bm_links:
+                    st.success("📌 북마크됨")
+                else:
+                    if st.button("📌 북마크", key=f"bm_{link}"):
+                        new_bm = {
+                            "title": title, "link": link, "published": published,
+                            "summary": summary, "score": score,
+                            "saved_at": datetime.now(kst).strftime("%Y-%m-%d %H:%M KST"),
+                        }
+                        st.session_state.bookmarks.append(new_bm)
+                        save_bookmarks(st.session_state.bookmarks)
+                        st.rerun()
 
     st.markdown("---")
